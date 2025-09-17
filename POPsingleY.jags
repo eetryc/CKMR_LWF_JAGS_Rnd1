@@ -1,0 +1,18 @@
+model{
+  surv ~ dunif(0.5, 0.95)
+
+  mu ~ dunif(1,100000)
+  sd ~ dunif(1,100000)
+
+  # Adult numbers
+  
+	for(i in 1:POP_years) {
+	
+	  Nadult[i] ~ dnorm(mu,1/(sd^2)) T(0,)
+
+		POPTrue[i] ~ dbinom((2 / Nadult[i])*(surv^AgeDif[i]), POP_viable_count[i])
+
+	}
+
+
+}

@@ -33,7 +33,7 @@ cat("model{
 	# Adult numbers (uninformative prior)
 
 	for(i in 1:nad) {
-		Nadult[i] ~ dnorm(100000, 1.0E-6) T(0,)
+		Nadult[i] ~ dunif(100,1000000)
 		POPs[i] ~ dbinom(2 / Nadult[i], OldEno_count[i])
 
 	}
