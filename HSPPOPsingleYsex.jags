@@ -1,0 +1,34 @@
+model{
+  
+  # survival uniform 50-95%
+  
+  surv ~ dunif(0.5, 0.95)
+
+  # proportion male in population (inverse of female, 1-propM)
+  propM ~ dbeta(1,1)
+
+  # Set up mean and stdev
+
+  mu ~ dunif(1,100000)
+  sd ~ dunif(1,100000)
+  
+  # Adult numbers
+  
+	for(i in 1:years) {
+	
+	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
+  
+	}
+	
+  for(j in 1:nobs) {
+  
+    TruePairs[j] ~ dbinom(
+      (RObase[j] * (surv ^ AgeDif[j])) /
+      ( (Nadult[j] * knownSex[j] * abs(propM - IsFemale[j])) +
+      (Nadult[j] * (1 - knownSex[j])) ),
+      Pair_viable_count[j]
+    )
+  }
+
+
+}

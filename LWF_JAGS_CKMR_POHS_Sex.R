@@ -34,7 +34,10 @@ POpairs <- LWF_final %>%
   filter(older_first) %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
-  dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) 
+  dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
+  mutate(nyears = Cohort_2 - Cohort_1)
+
+
 
 
 
@@ -62,7 +65,11 @@ HSpairs <- LWF_final %>%
   filter(older_first) %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
-  dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) 
+  dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
+  mutate(nyears = Cohort_2 - Cohort_1)
+
+HSpairs <- HSpairs %>%
+  mutate(nyears = Cohort_2 - Cohort_1)
 
 # count numnber of yes or no to get a better idea of how they are changing
 HSpairs %>% 
@@ -77,9 +84,14 @@ library(plyr)
 kinships <- rbind(data.frame=POPonly,
                   data.frame=HSPonly) 
 
-
-
-
+kinships <- kinships %>% 
+  mutate(
+    sex_num = case_when(
+      Sex_1 == "U" ~ NA_real_, # unknown to na
+      Sex_1 == "M" ~ 1, # male is 1
+      Sex_1 == "F" ~ 0 # female is 0
+    )
+  )
 
 
 
@@ -95,23 +107,39 @@ kinships <- rbind(data.frame=POPonly,
 
 #### JAGS model ####
 cat("model{
+  
+  # survival uniform 50-95%
+  
   surv ~ dunif(0.5, 0.95)
+
+  # proportion male in population (inverse of female, 1-propM)
+  propM ~ dbeta(1,1)
+
+  # Set up mean and stdev
 
   mu ~ dunif(1,100000)
   sd ~ dunif(1,100000)
-
+  
   # Adult numbers
   
 	for(i in 1:years) {
 	
 	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
-
-		TruePairs[i] ~ dbinom((RObase[i]*(surv^AgeDif[i]))/(Nadult[i]), Pair_viable_count[i])
-
+  
 	}
+	
+  for(j in 1:nobs) {
+  
+    TruePairs[j] ~ dbinom(
+      (RObase[j] * (surv ^ AgeDif[j])) /
+      ((Nadult[j] * knownSex[j] * abs(propM - IsFemale[j])) +
+      (Nadult[j] * (1 - knownSex[j]))),
+      Pair_viable_count[j]
+    )
+  }
 
 
-}", file = "HSPPOPsingleY.jags")
+}", file = "HSPPOPsingleYsex.jags")
 
 
 
@@ -138,26 +166,49 @@ Cohort_years <- kinships %>%
 
 years <- nrow(Cohort_years)
 
+knownSex <- kinships %>% 
+  as.numeric(!is.na(kinships$sex_num))
+
+
+# group together true by years
+ntrue <- kinships %>%
+  group_by(AgeDif,Cohort_2) %>%
+  dplyr::summarise(
+    ntrue = sum(TruePairs, na.rm = TRUE))
+
+  
+nobs = 
+
+KnownSex = as.numeric(!is.na(kinships$sex_num))
+
+IsFemale <- as.numeric(!is.na(kinships$sex_num) & kinships$sex_num == "0")
+
+
 # baseline probability (4 for unsexed HSPs, 2 for unsexed POPs)
 
 #### Run for single year ----
 data = list( years = years,  # number of cohorts,
              PairTrue = kinships$TruePairs,
-             AgeDif=kinships$AgeDif,
+             AgeDif = kinships$AgeDif,
              Pair_viable_count = Cohort_years$Pair_viable_count,
-             RObase = kinships$RObase)
+             RObase = kinships$RObase,
+             knownSex = KnownSex,
+             nobs = nobs,
+             IsFemale = IsFemale
+             )
 
 # Initial values
 inits = function() {
   list(
     mu = runif(1, 1, 100000),
     sd = runif(1, 1, 100000),
+    propM = runif(1,0.01, 0.99),
     Nadult = rep(10000, years)   # vector of length POP_years
   )
 }
 
 # Parameters to follow
-params = c("Nadult")
+params = c("Nadult","surv","propM")
 
 nburn <- 3000
 nchains <- 3
@@ -165,6 +216,4 @@ niter <- 5000
 n.cores = 3
 
 
-Out = jagsUI::jags(data, inits, params, "HSPPOPsingleY.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
-
-# intial, unedited run with this worked great, only bout 5 minutes to run and very good Rhat (1.000-1.002 for the 28 years)
+Out = jagsUI::jags(data, inits, params, "HSPPOPsingleYsex.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
