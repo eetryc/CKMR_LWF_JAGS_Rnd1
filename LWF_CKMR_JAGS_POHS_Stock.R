@@ -17,8 +17,8 @@ LWF_final <- original_clean %>%
   mutate(SampleDate = mdy(SampleDate),
          Month = month(SampleDate)) %>% 
   mutate(Stock  = case_when(
-    Month %in% 9:12 ~ list(sample(c("GMZ1","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.9,0.02,0.02,.02,0.04))),
-    Month %in% 1:8 ~ list(sample(c("GMZ1","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.6,0.05,0.05,0.2,0.1))),
+    Month %in% 9:12 ~ list(sample(c("GMZ1N","GMZ1S","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.02,0.02,0.02,0.9.02,0.02))),
+    Month %in% 1:8 ~ list(sample(c("GMZ1","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.05,0.00,0.4,0.25,0.15,0.15))),
     TRUE ~ list(NA_character_)  
   ))
 

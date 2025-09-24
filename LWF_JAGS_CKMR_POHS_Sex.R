@@ -1,6 +1,8 @@
 #### Set up data frame for analysis with both HSPs and POPs ####
 
 library(tidyverse)
+setwd("~/GitHub/CKMR_LWF_JAGS_Rnd1")
+
 
 # load in data table with full information 
 original=read.csv("LWF_Info.csv",h=T)
@@ -46,6 +48,7 @@ POpairs %>%
   dplyr::count(HSPPOP_candidate)
 
 
+# select only potential pairs, add baseline prob (2 if unknown, 1 if sex known)
 POPonly <- POpairs %>% 
   filter(HSPPOP_candidate == 1) %>% 
   mutate(RObase=ifelse(Sex_1 == "U",2,1)) # change known sex to 1 (not compensating for there being two possible parents because we know it's mom or dad)
@@ -146,17 +149,9 @@ cat("model{
 
 #### Data to define for JAGS model ####
 
-# Real POP/HSP - here assign randomly based on probability 
 
-set.seed(777)
-kinships <- kinships %>%
-  mutate(TruePairs = case_when(
-    RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
-    RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
-    RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
-    TRUE ~ 0
-  ))
 
+# years being estimated (years that actually have potential)
 Cohort_years <- kinships %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
@@ -165,33 +160,84 @@ Cohort_years <- kinships %>%
   filter(Pair_viable_count > 0) %>%     # keep only cohorts with >0
   arrange(Cohort_2)
 
+# extract years (count to give to be i in JAGS)
 years <- nrow(Cohort_years)
 
 
-# group together true by years
-counts_by_cohort_age <- kinships %>%
+
+# group together by cohort year and age dif (differing probabilities)
+Cohort_years_cohort_age <- kinships %>%
   group_by(Cohort_2, AgeDif) %>%
   dplyr::summarise(
     Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
-year <- length(unique(nobs$Cohort_2))
-
-KnownSex = as.numeric(!is.na(kinships$sex_num))
-
-IsFemale <- as.numeric(!is.na(kinships$sex_num) & kinships$sex_num == 0)
 
 
-# baseline probability (4 for unsexed HSPs, 2 for unsexed POPs)
+
+
+
+# add the counts to each observation
+kinships_obs <- kinships %>%
+  left_join(Cohort_years_cohort_age, by = c("Cohort_2", "AgeDif"))
+
+# year index to link kinship to years (just the number to match it, not the actual year)
+year_index <- factor(kinships_obs$Cohort_2, levels = Cohort_years$Cohort_2)
+kinships_obs <- kinships_obs %>%
+  mutate(
+    year_index = as.integer(year_index)
+  )
+
+
+
+
+# Count the ones with known sex (U = 0)
+# Count females (F = 1)
+kinships_obs <- kinships_obs %>%
+  mutate(
+    knownSex = as.numeric(!is.na(sex_num)),
+    IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
+  )
+
+# Real POP/HSP - here assign randomly based on probability 
+
+set.seed(777)
+kinships_obs <- kinships_obs %>% 
+  mutate(TruePairs = case_when(
+    RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
+    TRUE ~ 0
+  ))
+
+
+
+
+#### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
+group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase")
+
+collapsed <- kinships_obs %>%
+  group_by(year_index,across(all_of(group_vars))) %>%
+  dplyr::summarise(
+    Pair_viable_count_per_agedif = n(),                   
+    TruePairs = sum(TruePairs, na.rm=TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Cohort_2, AgeDif)
+
+
 
 #### Run for single year ----
+# use as.numeric if any are giving issues
+# make sure all (except years for i loop) are equal to nobs! Check with length first...
 data = list( years = years,  # number of cohorts,
-             PairTrue = kinships$TruePairs,
-             AgeDif = kinships$AgeDif,
-             Pair_viable_count = Cohort_years$Pair_viable_count,
-             RObase = kinships$RObase,
-             knownSex = KnownSex,
-             nobs = nrow(kinships),
-             IsFemale = IsFemale,
-             Pair_viable_count_per_agedif = nobs$ntrue
+             TruePairs = collapsed$TruePairs,
+             AgeDif = collapsed$AgeDif,
+             Pair_viable_count = collapsed$Pair_viable_count_per_agedif,
+             RObase = collapsed$RObase,
+             knownSex = as.numeric(collapsed$knownSex),
+             nobs = nrow(collapsed),
+             IsFemale = collapsed$IsFemale,
+             Pair_viable_count_per_agedif = collapsed$Pair_viable_count_per_agedif,
+             year=collapsed$year_index
              )
 
 # Initial values
