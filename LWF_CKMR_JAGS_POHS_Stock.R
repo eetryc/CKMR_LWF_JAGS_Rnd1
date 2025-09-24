@@ -88,7 +88,7 @@ HSPonly <- HSpairs %>%
   mutate(RObase=4) %>% 
   mutate(Stock_1 = unlist(Stock_1),
          Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # likllihoods for if they are from the same place vs not
+         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # liklihoods for if they are from the same place vs not
 
 # join the two tables
 library(plyr)

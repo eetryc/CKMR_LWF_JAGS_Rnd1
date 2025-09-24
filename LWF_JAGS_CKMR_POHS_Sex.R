@@ -48,7 +48,7 @@ POpairs %>%
 
 POPonly <- POpairs %>% 
   filter(HSPPOP_candidate == 1) %>% 
-  mutate(RObase=2)
+  mutate(RObase=ifelse(Sex_1 == "U",2,1)) # change known sex to 1 (not compensating for there being two possible parents because we know it's mom or dad)
 
 
 ### HSPs and combine ###
@@ -132,9 +132,9 @@ cat("model{
   
     TruePairs[j] ~ dbinom(
       (RObase[j] * (surv ^ AgeDif[j])) /
-      ((Nadult[j] * knownSex[j] * abs(propM - IsFemale[j])) +
-      (Nadult[j] * (1 - knownSex[j]))),
-      Pair_viable_count[j]
+      ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
+      (Nadult[year[j]] * (1 - knownSex[j]))),
+      Pair_viable_count_per_agedif[j]
     )
   }
 
@@ -151,6 +151,7 @@ cat("model{
 set.seed(777)
 kinships <- kinships %>%
   mutate(TruePairs = case_when(
+    RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
     RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
     RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
     TRUE ~ 0
@@ -166,22 +167,17 @@ Cohort_years <- kinships %>%
 
 years <- nrow(Cohort_years)
 
-knownSex <- kinships %>% 
-  as.numeric(!is.na(kinships$sex_num))
-
 
 # group together true by years
-ntrue <- kinships %>%
-  group_by(AgeDif,Cohort_2) %>%
+counts_by_cohort_age <- kinships %>%
+  group_by(Cohort_2, AgeDif) %>%
   dplyr::summarise(
-    ntrue = sum(TruePairs, na.rm = TRUE))
-
-  
-nobs = 
+    Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
+year <- length(unique(nobs$Cohort_2))
 
 KnownSex = as.numeric(!is.na(kinships$sex_num))
 
-IsFemale <- as.numeric(!is.na(kinships$sex_num) & kinships$sex_num == "0")
+IsFemale <- as.numeric(!is.na(kinships$sex_num) & kinships$sex_num == 0)
 
 
 # baseline probability (4 for unsexed HSPs, 2 for unsexed POPs)
@@ -193,8 +189,9 @@ data = list( years = years,  # number of cohorts,
              Pair_viable_count = Cohort_years$Pair_viable_count,
              RObase = kinships$RObase,
              knownSex = KnownSex,
-             nobs = nobs,
-             IsFemale = IsFemale
+             nobs = nrow(kinships),
+             IsFemale = IsFemale,
+             Pair_viable_count_per_agedif = nobs$ntrue
              )
 
 # Initial values

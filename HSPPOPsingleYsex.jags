@@ -24,9 +24,9 @@ model{
   
     TruePairs[j] ~ dbinom(
       (RObase[j] * (surv ^ AgeDif[j])) /
-      ( (Nadult[j] * knownSex[j] * abs(propM - IsFemale[j])) +
-      (Nadult[j] * (1 - knownSex[j])) ),
-      Pair_viable_count[j]
+      ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
+      (Nadult[year[j]] * (1 - knownSex[j]))),
+      Pair_viable_count_per_agedif[j]
     )
   }
 
