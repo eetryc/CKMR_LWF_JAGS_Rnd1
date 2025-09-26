@@ -17,8 +17,8 @@ LWF_final <- original_clean %>%
   mutate(SampleDate = mdy(SampleDate),
          Month = month(SampleDate)) %>% 
   mutate(Stock  = case_when(
-    Month %in% 9:12 ~ list(sample(c("GMZ1N","GMZ1S","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.02,0.02,0.02,0.9.02,0.02))),
-    Month %in% 1:8 ~ list(sample(c("GMZ1","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.05,0.00,0.4,0.25,0.15,0.15))),
+    Month %in% 9:12 ~ list(sample(c("GMZ1N","GMZ1S","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.02,0.02,0.02,0.9,0.02,0.02))),
+    Month %in% 1:8 ~ list(sample(c("GMZ1N","GMZ1S","GMZ2","GMZ3","GMZ4","GMZ5"),size=1, prob = c(0.05,0.00,0.4,0.25,0.15,0.15))),
     TRUE ~ list(NA_character_)  
   ))
 
@@ -92,7 +92,7 @@ HSPonly <- HSpairs %>%
 
 # join the two tables
 library(plyr)
-kinships <- rbind(data.frame=POPonly,
+kinshipsStock <- rbind(data.frame=POPonly,
                   data.frame=HSPonly) 
 
 
@@ -154,14 +154,14 @@ cat("model{
 # Real POP/HSP - here assign randomly based on probability 
 
 set.seed(777)
-kinships <- kinships %>%
+kinshipsStock <- kinshipsStock %>%
   mutate(TruePairs = case_when(
     RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
     RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
     TRUE ~ 0
   ))
 
-Cohort_years <- kinships %>% 
+Cohort_years <- kinshipsStock %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
     Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
@@ -175,11 +175,11 @@ years <- nrow(Cohort_years)
 
 #### Run for single year ----
 data = list( years = years,  # number of cohorts,
-             PairTrue = kinships$TruePairs,
-             AgeDif=kinships$AgeDif,
+             PairTrue = kinshipsStock$TruePairs,
+             AgeDif=kinshipsStock$AgeDif,
              Pair_viable_count = Cohort_years$Pair_viable_count,
-             RObase = kinships$RObase,
-             StockWeight = kinships$StockWeight)
+             RObase = kinshipsStock$RObase,
+             StockWeight = kinshipsStock$StockWeight)
 
 # Initial values
 inits = function() {

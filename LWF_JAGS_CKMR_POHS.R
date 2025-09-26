@@ -105,7 +105,7 @@ cat("model{
   
 	for(i in 1:years) {
 
-	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
+	  Nadult[i] ~ dbinom(mu, 1/(sd^2)) T(0, 1e+09)
 
 		TruePairs[i] ~ dbinom((RObase[i]*(surv^AgeDif[i]))/(Nadult[i]), Pair_viable_count[i])
 
@@ -143,7 +143,7 @@ years <- nrow(Cohort_years)
 
 #### Run for single year ----
 data = list( years = years,  # number of cohorts,
-             PairTrue = kinships$TruePairs,
+             TruePairs = kinships$TruePairs,
              AgeDif=kinships$AgeDif,
              Pair_viable_count = Cohort_years$Pair_viable_count,
              RObase = kinships$RObase)
