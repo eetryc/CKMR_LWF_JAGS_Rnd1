@@ -95,8 +95,7 @@ kinships <- rbind(data.frame=POPonly,
 
 #### JAGS model ####
 cat("model{
-	
-	surv ~ dunif(0.5, 0.95)
+  surv ~ dunif(0.5, 0.95)
 
   mu ~ dunif(1,100000)
   sd ~ dunif(1,100000)
@@ -104,7 +103,7 @@ cat("model{
   # Adult numbers
   
 	for(i in 1:years) {
-
+	
 	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
 
 		TruePairs[i] ~ dbinom((RObase[i]*(surv^AgeDif[i]))/(Nadult[i]), Pair_viable_count[i])

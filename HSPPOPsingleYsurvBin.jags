@@ -1,0 +1,22 @@
+model{
+	
+  mu ~ dunif(1,100000)
+  sd ~ dunif(1,100000)
+  
+  # Grouped survival estimate
+  for(g in 1:ngroups) {
+    surv[g] ~ dunif(0.5,0.95)
+  }
+
+
+  # Adult numbers
+	for(i in 1:years) {
+	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(1, 1e+09)
+	}
+	  
+	for (j in 1:nobs) {
+		TruePairs[j] ~ dbinom((RObase[j]*(surv[group_index[j]]^AgeDif[j]))/(Nadult[year_index[j]]), Pair_viable_count[j])
+	}
+
+
+}

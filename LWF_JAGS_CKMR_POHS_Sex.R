@@ -84,10 +84,10 @@ HSPonly <- HSpairs %>%
 
 # join the two tables
 library(plyr)
-kinships <- rbind(data.frame=POPonly,
+kinshipsSex <- rbind(data.frame=POPonly,
                   data.frame=HSPonly) 
 
-kinships <- kinships %>% 
+kinshipsSex <- kinshipsSex %>% 
   mutate(
     sex_num = case_when(
       Sex_1 == "U" ~ NA_real_, # unknown to na
@@ -111,10 +111,8 @@ kinships <- kinships %>%
 #### JAGS model ####
 cat("model{
   
-  # survival uniform 50-95%
+  # survival uniform 50-95% (can be put in the j loop to estimate yearly survival)
   
-  surv ~ dunif(0.5, 0.95)
-
   # proportion male in population (inverse of female, 1-propM)
   propM ~ dbeta(1,1)
 
@@ -129,12 +127,14 @@ cat("model{
 	
 	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
   
+    surv[i] ~ dunif(0.5, 0.95)
+
 	}
 	
   for(j in 1:nobs) {
-  
+    
     TruePairs[j] ~ dbinom(
-      (RObase[j] * (surv ^ AgeDif[j])) /
+      (RObase[j] * (surv[year[j]]^ AgeDif[j])) /
       ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
       (Nadult[year[j]] * (1 - knownSex[j]))),
       Pair_viable_count_per_agedif[j]
@@ -152,7 +152,7 @@ cat("model{
 
 
 # years being estimated (years that actually have potential)
-Cohort_years <- kinships %>% 
+Cohort_years <- kinshipsSex %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
     Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
@@ -166,7 +166,7 @@ years <- nrow(Cohort_years)
 
 
 # group together by cohort year and age dif (differing probabilities)
-Cohort_years_cohort_age <- kinships %>%
+Cohort_years_cohort_age <- kinshipsSex %>%
   group_by(Cohort_2, AgeDif) %>%
   dplyr::summarise(
     Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
@@ -176,12 +176,12 @@ Cohort_years_cohort_age <- kinships %>%
 
 
 # add the counts to each observation
-kinships_obs <- kinships %>%
+kinshipsSex_obs <- kinshipsSex %>%
   left_join(Cohort_years_cohort_age, by = c("Cohort_2", "AgeDif"))
 
 # year index to link kinship to years (just the number to match it, not the actual year)
-year_index <- factor(kinships_obs$Cohort_2, levels = Cohort_years$Cohort_2)
-kinships_obs <- kinships_obs %>%
+year_index <- factor(kinshipsSex_obs$Cohort_2, levels = Cohort_years$Cohort_2)
+kinshipsSex_obs <- kinshipsSex_obs %>%
   mutate(
     year_index = as.integer(year_index)
   )
@@ -191,7 +191,7 @@ kinships_obs <- kinships_obs %>%
 
 # Count the ones with known sex (U = 0)
 # Count females (F = 1)
-kinships_obs <- kinships_obs %>%
+kinshipsSex_obs <- kinshipsSex_obs %>%
   mutate(
     knownSex = as.numeric(!is.na(sex_num)),
     IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
@@ -200,7 +200,7 @@ kinships_obs <- kinships_obs %>%
 # Real POP/HSP - here assign randomly based on probability 
 
 set.seed(777)
-kinships_obs <- kinships_obs %>% 
+kinshipsSex_obs <- kinshipsSex_obs %>% 
   mutate(TruePairs = case_when(
     RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
     RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
@@ -214,7 +214,7 @@ kinships_obs <- kinships_obs %>%
 #### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
 group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase")
 
-collapsed <- kinships_obs %>%
+collapsed <- kinshipsSex_obs %>%
   group_by(year_index,across(all_of(group_vars))) %>%
   dplyr::summarise(
     Pair_viable_count_per_agedif = n(),                   
@@ -246,7 +246,8 @@ inits = function() {
     mu = runif(1, 1, 100000),
     sd = runif(1, 1, 100000),
     propM = runif(1,0.01, 0.99),
-    Nadult = rep(10000, years)   # vector of length POP_years
+    Nadult = rep(10000, years),   # vector of length POP_years
+    surv = (rep(.7,years))
   )
 }
 
@@ -260,3 +261,7 @@ n.cores = 3
 
 
 Out = jagsUI::jags(data, inits, params, "HSPPOPsingleYsex.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
+# initial did not have fantastic rhat values, specifically for the years with lowered potential and actual pairs (which makes sense, especially given the stochastic way I assigned the true pairs)
+# but it did run in under 2 minutes
+# Same deal with addition of survival to every year. these rhat values were pretty solid. however, again maybe not super accurate to do a per year estimate for this 
+
