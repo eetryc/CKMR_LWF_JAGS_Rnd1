@@ -163,10 +163,14 @@ HSPonly <- HSpairs %>%
 # join the two tables
 library(plyr)
 kinshipsSexStock <- rbind(data.frame=POPonly,
-                       data.frame=HSPonly) 
-
-
-
+                       data.frame=HSPonly)  %>% 
+  mutate(
+    sex_num = case_when(
+      Sex_1 == "U" ~ NA_real_, # unknown to na
+      Sex_1 == "M" ~ 1, # male is 1
+      Sex_1 == "F" ~ 0 # female is 0
+    )
+  )
 
 
 
@@ -198,9 +202,11 @@ kinshipsSexStock <- rbind(data.frame=POPonly,
 
 #### JAGS model ####
 cat("model{
-  # survival
-  surv ~ dunif(0.5, 0.95) 
 
+  # proportion male in population (inverse of female, 1-propM)
+  propM ~ dbeta(1,1)
+  
+  
   mu ~ dunif(1,100000)
   sd ~ dunif(1,100000)
   
@@ -209,29 +215,31 @@ cat("model{
 	
 	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
 
-		TruePairs[i] ~ dbinom((RObase[i]*(surv^AgeDif[i])*StockWeight[i])/(Nadult[i]), Pair_viable_count[i])
+    surv[i] ~ dunif(0.5, 0.95)
 
 	}
+	
+	
+  for(j in 1:nobs) {
+    
+    TruePairs[j] ~ dbinom(
+      (RObase[j] * (surv[year[j]]^ AgeDif[j])) /
+      ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
+      (Nadult[year[j]] * (1 - knownSex[j]))),
+      Pair_viable_count_per_agedif[j]
+    )
+  }	
 
-
-}", file = "HSPPOP.stocks.singleY.jags")
+}", file = "HSPPOP.sex.stocks.singleY.jags")
 
 
 
 
 #### Data to define for JAGS model ####
 
-# Real POP/HSP - here assign randomly based on probability 
 
-set.seed(777)
-kinshipsStock <- kinshipsStock %>%
-  mutate(TruePairs = case_when(
-    RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
-    RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
-    TRUE ~ 0
-  ))
-
-Cohort_years <- kinshipsStock %>% 
+# years being estimated (years that actually have potential)
+Cohort_years <- kinshipsSexStock %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
     Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
@@ -239,43 +247,95 @@ Cohort_years <- kinshipsStock %>%
   filter(Pair_viable_count > 0) %>%     # keep only cohorts with >0
   arrange(Cohort_2)
 
+# extract years (count to give to be i in JAGS)
 years <- nrow(Cohort_years)
 
-# baseline probability (4 for unsexed HSPs, 2 for unsexed POPs)
+
+# group together by cohort year and age dif (differing probabilities)
+Cohort_years_cohort_age <- kinshipsSexStock %>%
+  group_by(Cohort_2, AgeDif) %>%
+  dplyr::summarise(
+    Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
+
+
+# add the counts to each observation
+kinshipsSex_obs <- kinshipsSexStock %>%
+  left_join(Cohort_years_cohort_age, by = c("Cohort_2", "AgeDif"))
+
+# year index to link kinship to years (just the number to match it, not the actual year)
+year_index <- factor(kinshipsSex_obs$Cohort_2, levels = Cohort_years$Cohort_2)
+kinshipsSex_obs <- kinshipsSex_obs %>%
+  mutate(
+    year_index = as.integer(year_index)
+  )
+
+
+
+
+# Count the ones with known sex (U = 0)
+# Count females (F = 1)
+kinshipsSex_obs <- kinshipsSex_obs %>%
+  mutate(
+    knownSex = as.numeric(!is.na(sex_num)),
+    IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
+  )
+
+
+
+# Real POP/HSP - here assign randomly based on probability 
+
+set.seed(777)
+kinshipsSex_obs <- kinshipsSex_obs %>% 
+  mutate(TruePairs = case_when(
+    RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
+    TRUE ~ 0
+  ))
+
+
+#### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
+group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase")
+
+collapsed <- kinshipsSex_obs %>%
+  group_by(year_index,across(all_of(group_vars))) %>%
+  dplyr::summarise(
+    Pair_viable_count_per_agedif = n(),                   
+    TruePairs = sum(TruePairs, na.rm=TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Cohort_2, AgeDif)
+
+
 
 #### Run for single year ----
+# use as.numeric if any are giving issues
+# make sure all (except years for i loop) are equal to nobs! Check with length first...
 data = list( years = years,  # number of cohorts,
-             TruePairs = kinshipsStock$TruePairs,
-             AgeDif=kinshipsStock$AgeDif,
-             Pair_viable_count = Cohort_years$Pair_viable_count,
-             RObase = kinshipsStock$RObase,
-             StockWeight = kinshipsStock$StockWeight)
-
-# convert to numeric if not already (try this first if node issues occur)
-data <- list(
-  years = as.numeric(years),
-  TruePairs = as.numeric(kinshipsStock$TruePairs),
-  AgeDif = as.numeric(kinshipsStock$AgeDif),
-  Pair_viable_count = as.numeric(Cohort_years$Pair_viable_count),
-  RObase = as.numeric(kinshipsStock$RObase),
-  StockWeight = as.numeric(kinshipsStock$StockWeight)
+             TruePairs = collapsed$TruePairs,
+             AgeDif = collapsed$AgeDif,
+             Pair_viable_count = collapsed$Pair_viable_count_per_agedif,
+             RObase = collapsed$RObase,
+             knownSex = as.numeric(collapsed$knownSex),
+             nobs = nrow(collapsed),
+             IsFemale = collapsed$IsFemale,
+             Pair_viable_count_per_agedif = collapsed$Pair_viable_count_per_agedif,
+             year=collapsed$year_index
 )
-
-
-
 
 # Initial values
 inits = function() {
   list(
     mu = runif(1, 1, 100000),
     sd = runif(1, 1, 100000),
+    propM = runif(1,0.01, 0.99),
     Nadult = rep(10000, years),   # vector of length POP_years
-    surv=rep(.6)
+    surv = (rep(.7,years))
   )
 }
 
 # Parameters to follow
-params = c("Nadult","surv")
+params = c("Nadult","surv","propM")
 
 nburn <- 3000
 nchains <- 3
@@ -283,8 +343,8 @@ niter <- 5000
 n.cores = 3
 
 
-Out = jagsUI::jags(data, inits, params, "HSPPOP.stocks.singleY.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
-
+Out = jagsUI::jags(data, inits, params, "HSPPOP.sex.stocks.singleY.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
+# worked initially will a few funky Rhat values for some Nhat years where Neff was low. 
 
 # if issues occur, run un parallelized
 Out <- jagsUI::jags(
@@ -298,6 +358,12 @@ Out <- jagsUI::jags(
   parallel = FALSE,
   verbose = TRUE
 )
+
+
+
+
+
+
 
 
 
