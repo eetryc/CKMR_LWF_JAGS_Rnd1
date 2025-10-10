@@ -105,7 +105,7 @@ cat("model{
   
 	for(i in 1:years) {
 
-	  Nadult[i] ~ dbinom(mu, 1/(sd^2)) T(0, 1e+09)
+	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
 
 		TruePairs[i] ~ dbinom((RObase[i]*(surv^AgeDif[i]))/(Nadult[i]), Pair_viable_count[i])
 
@@ -129,10 +129,32 @@ kinships <- kinships %>%
     TRUE ~ 0
   ))
 
+# Alternative to assign based on age difference likelihoods 
+kinships <- kinships %>%
+  mutate(prob = case_when(
+    RObase == 2 ~ 0.01 * exp(-0.06 * AgeDif),
+    RObase == 4 ~ 0.0001 * exp(-0.06 * AgeDif),
+    TRUE ~ 0
+  ),
+  TruePairs = rbinom(nrow(.), size = 1, prob = prob))
+
+
+
+true_per_year <- kinships %>% 
+  group_by(Cohort_2,AgeDif) %>% 
+  dplyr::summarise(
+    Pair_true_count = as.integer(sum(TruePairs > 0, na.rm = TRUE))
+  ) %>% 
+  filter(Pair_true_count > 0) %>%     # keep only cohorts with >0
+  arrange(Cohort_2)
+
+
+
+
 Cohort_years <- kinships %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
-    Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
+    Pair_viable_count = as.integer(sum(HSPPOP_candidate > 0, na.rm = TRUE))
   ) %>% 
   filter(Pair_viable_count > 0) %>%     # keep only cohorts with >0
   arrange(Cohort_2)

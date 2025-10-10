@@ -111,7 +111,8 @@ POpairs <- LWF_final_GMZ_mixed %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
   dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
-  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_"))
+  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_")) %>% 
+  mutate(nyears = Cohort_2 - Cohort_1)
 
 
 
@@ -123,7 +124,7 @@ POpairs %>%
 
 POPonly <- POpairs %>% 
   filter(HSPPOP_candidate == 1) %>% 
-  mutate(RObase=2) %>% 
+  mutate(RObase=ifelse(Sex_1 == "U",2,1)) %>% 
   mutate(Stock_1 = unlist(Stock_1),
          Stock_2 = unlist(Stock_2),
          StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # likllihoods for if they are from the same place vs not
@@ -144,7 +145,8 @@ HSpairs <- LWF_final_GMZ_mixed %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
   dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
-  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_"))
+  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_"))%>% 
+  mutate(nyears = Cohort_2 - Cohort_1)
 
 
 # count numnber of yes or no to get a better idea of how they are changing
@@ -160,8 +162,8 @@ HSPonly <- HSpairs %>%
 
 # join the two tables
 library(plyr)
-kinshipsStock <- rbind(data.frame=POPonly,
-                  data.frame=HSPonly) 
+kinshipsSexStock <- rbind(data.frame=POPonly,
+                       data.frame=HSPonly) 
 
 
 
@@ -355,8 +357,3 @@ ggplot(Rhat_df, aes(x = Year, y = Rhat)) +
   in a well mixed fishery"
   ) +
   theme_minimal(base_size = 14)
-
-
-
-
-# intial, unedited run with this worked great, only bout 5 minutes to run and very good Rhat (1.000-1.002 for the 28 years)
