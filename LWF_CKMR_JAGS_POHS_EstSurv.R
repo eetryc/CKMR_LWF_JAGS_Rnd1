@@ -2,6 +2,8 @@
 
 library(tidyverse)
 
+setwd("~/GitHub/CKMR_LWF_JAGS_Rnd1")
+
 # load in data table with full information 
 original=read.csv("LWF_Info.csv",h=T)
 
@@ -13,7 +15,7 @@ original_clean <- original %>%
 
 LWF_final <- original_clean %>%
   mutate(Cohort = SampleYear - FinalAge) %>% 
-  select(SampleID,Cohort,SampleYear,SampleDate,Sex) %>% 
+  select(SampleID,Cohort,SampleYear,SampleDate,Sex,Length_mm) %>% 
   mutate(SampleDate = mdy(SampleDate),
          Month = month(SampleDate))
 

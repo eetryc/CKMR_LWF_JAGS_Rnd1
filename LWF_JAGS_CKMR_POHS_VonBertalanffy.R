@@ -1,7 +1,9 @@
 #### Set up data frame for analysis with both HSPs and POPs ####
-setwd("~/GitHub/CKMR_LWF_JAGS_Rnd1")
 
 library(tidyverse)
+library(lubridate)
+setwd("~/GitHub/CKMR_LWF_JAGS_Rnd1")
+
 
 # load in data table with full information 
 original=read.csv("LWF_Info.csv",h=T)
@@ -11,93 +13,23 @@ original_clean <- original %>%
 
 
 # select columns and add cohort year column
-set.seed(102)
-library(dplyr)
-library(lubridate)
 
-set.seed(123)
-
-LWF_final_GMZ_mixed <- original_clean %>%
-  mutate(
-    Cohort = SampleYear - FinalAge,
-    SampleDate = mdy(SampleDate),
-    Month = month(SampleDate)
-  ) %>%
-  select(SampleID, Cohort, SampleYear, SampleDate, Sex, Month,Length_mm) %>%
-  mutate(
-    Stock = case_when(
-      Month %in% 9:12 ~ sample(
-        c("GMZ1N", "GMZ1S", "GMZ2", "GMZ3", "GMZ4", "GMZ5"),
-        size = nrow(.), replace = TRUE,
-        prob = c(0.02, 0.02, 0.02, 0.9, 0.02, 0.02)
-      ),
-      Month %in% 1:8 ~ sample(
-        c("GMZ1N", "GMZ1S", "GMZ2", "GMZ3", "GMZ4", "GMZ5"),
-        size = nrow(.), replace = TRUE,
-        prob = c(0.05, 0.00, 0.4, 0.25, 0.15, 0.15)
-      ),
-      TRUE ~ NA_character_
-    )
-  )
-
-
-# test for a little dispersal
-table(unlist(LWF_final_GMZ_mixed$Stock))
-
-# visualize stock assignment distribution 
-ggplot(LWF_final_GMZ_mixed, aes(x = Stock),colo) +
-  geom_bar() +
-  theme_minimal() +
-  xlab("Source") +
-  ylab("Percent of Individuals Caught in WFM-06") 
-
-
-# well mixed
-set.seed(123)
-
-LWF_final_well_mixed <- original_clean %>%
-  mutate(
-    Cohort = SampleYear - FinalAge,
-    SampleDate = mdy(SampleDate),
-    Month = month(SampleDate)
-  ) %>%
-  select(SampleID, Cohort, SampleYear, SampleDate, Sex, Month) %>%
-  mutate(
-    Stock = case_when(
-      Month %in% 9:12 ~ sample(
-        c("GMZ1N", "GMZ1S", "GMZ2", "GMZ3", "GMZ4", "GMZ5"),
-        size = nrow(.), replace = TRUE,
-        prob = c(0.167, 0.167, 0.167, 0.167, 0.167, 0.167)
-      ),
-      Month %in% 1:8 ~ sample(
-        c("GMZ1N", "GMZ1S", "GMZ2", "GMZ3", "GMZ4", "GMZ5"),
-        size = nrow(.), replace = TRUE,
-        prob = c(0.167, 0.167, 0.167, 0.167, 0.167, 0.167)
-      ),
-      TRUE ~ NA_character_
-    )
-  )
-
-
-# test for a little dispersal
-table(unlist(LWF_final_well_mixed$Stock))
+LWF_final <- original_clean %>%
+  mutate(Cohort = SampleYear - FinalAge) %>% 
+  select(SampleID,Cohort,SampleYear,SampleDate,Sex,Length_mm) %>% 
+  mutate(SampleDate = mdy(SampleDate),
+         Month = month(SampleDate))
 
 
 
 
-# visualize stock assignment distribution 
-ggplot(LWF_final_well_mixed, aes(x = Stock),colo) +
-  geom_bar() +
-  theme_minimal() +
-  xlab("Source") +
-  ylab("Percent of Individuals Caught in WFM-06") 
 
 
 
 ### POPs filter 
-POpairs <- LWF_final_GMZ_mixed %>%
+POpairs <- LWF_final %>%
   rename_with(~ paste0(.x, "_1"), everything()) %>% # add the columns fro each indiv
-  cross_join(LWF_final_GMZ_mixed %>% rename_with(~ paste0(.x, "_2"), everything())) %>% # remove self-pairings
+  cross_join(LWF_final %>% rename_with(~ paste0(.x, "_2"), everything())) %>% # remove self-pairings
   mutate(conception = ymd(paste0(Cohort_2-1,"-10-01"))) %>% ###### Change as needed to fiddle with conception date
   # mutate to add the POP possibility (y/n) with the year and reproductive age filters
   mutate(HSPPOP_candidate = ifelse(Cohort_1 < Cohort_2 & 
@@ -112,8 +44,8 @@ POpairs <- LWF_final_GMZ_mixed %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
   dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
-  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_")) %>% 
   mutate(nyears = Cohort_2 - Cohort_1)
+
 
 
 
@@ -123,19 +55,20 @@ POpairs %>%
   dplyr::count(HSPPOP_candidate)
 
 
+# select only potential pairs, add baseline prob (2 if unknown, 1 if sex known)
 POPonly <- POpairs %>% 
   filter(HSPPOP_candidate == 1) %>% 
-  mutate(RObase=ifelse(Sex_1 == "U",2,1)) %>% 
-  mutate(Stock_1 = unlist(Stock_1),
-         Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # likllihoods for if they are from the same place vs not
+  mutate(RObase=ifelse(Sex_1 == "U",2,1)) %>% # change known sex to 1 (not compensating for there being two possible parents because we know it's mom or dad)
+  mutate(conception_year = year(conception)) %>% 
+  mutate(agei_conceptionj = conception_year - Cohort_1)
+
 
 
 ### HSPs and combine ###
 
-HSpairs <- LWF_final_GMZ_mixed %>%
+HSpairs <- LWF_final %>%
   rename_with(~ paste0(.x, "_1"), everything()) %>% # sort into col for each indiv
-  cross_join(LWF_final_GMZ_mixed %>% rename_with(~ paste0(.x, "_2"), everything())) %>% # remove self-pairings
+  cross_join(LWF_final %>% rename_with(~ paste0(.x, "_2"), everything())) %>% # remove self-pairings
   mutate(conception = ymd(paste0(Cohort_2-1,"-10-01"))) %>% ###### Change as needed to fiddle with conception date
   mutate(HSPPOP_candidate = ifelse(Cohort_1 < Cohort_2 & (Cohort_1 != Cohort_2),"1","0")) %>% 
   #get rid of the ones that are the same comp, eg 1 and 2 vs 2 and 1 
@@ -146,9 +79,10 @@ HSpairs <- LWF_final_GMZ_mixed %>%
   select(-older_first) %>% 
   mutate(AgeDif = Cohort_2 - Cohort_1) %>% 
   dplyr::rename(Individual_1 = SampleID_1,Individual_2 = SampleID_2) %>% 
-  mutate(StockPair = paste(Stock_1, Stock_2, sep = "_"))%>% 
   mutate(nyears = Cohort_2 - Cohort_1)
 
+HSpairs <- HSpairs %>%
+  mutate(nyears = Cohort_2 - Cohort_1)
 
 # count numnber of yes or no to get a better idea of how they are changing
 HSpairs %>% 
@@ -157,14 +91,15 @@ HSpairs %>%
 HSPonly <- HSpairs %>% 
   filter(HSPPOP_candidate == 1) %>% 
   mutate(RObase=4) %>% 
-  mutate(Stock_1 = unlist(Stock_1),
-         Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # liklihoods for if they are from the same place vs not
+  mutate(conception_year = year(conception)) %>% 
+  mutate(agei_conceptionj = conception_year - Cohort_1)
 
 # join the two tables
 library(plyr)
-kinshipsSexStock <- rbind(data.frame=POPonly,
-                       data.frame=HSPonly)  %>% 
+kinshipsVB <- rbind(data.frame=POPonly,
+                     data.frame=HSPonly) 
+
+kinshipsVB <- kinshipsVB %>% 
   mutate(
     sex_num = case_when(
       Sex_1 == "U" ~ NA_real_, # unknown to na
@@ -175,19 +110,18 @@ kinshipsSexStock <- rbind(data.frame=POPonly,
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+#### Add in length and estimated fecundity of the mom for MOPs 
+kinshipsVB <-  kinshipsVB %>% 
+  mutate(VBlength_conceptionj = 617.2307131 * (1 - exp(-0.1582472 * (agei_conceptionj + 4.2497746)))) %>% 
+  mutate(vb_smaller = Length_mm_1-VBlength_conceptionj) %>% 
+  mutate(fecundity_conceptionj = case_when(
+                                  sex_num == 0 ~ 0.0404*((VBlength_conceptionj/10)^(3.527)),
+                                  sex_num == 1 ~ 1,
+                                  is.na(sex_num) ~ 1)) %>% 
+  mutate(fecundity_weigtht = case_when(
+                              sex_num == 0 ~ fecundity_conceptionj/(max(fecundity_conceptionj)),
+                              sex_num == 1 ~ 1,
+                              is.na(sex_num) ~ 1))
 
 
 
@@ -203,35 +137,39 @@ kinshipsSexStock <- rbind(data.frame=POPonly,
 
 #### JAGS model ####
 cat("model{
-
+  
+  # survival uniform 50-95% (can be put in the j loop to estimate yearly survival)
+  
   # proportion male in population (inverse of female, 1-propM)
   propM ~ dbeta(1,1)
-  
-  
+
+  # Set up mean and stdev
+
   mu ~ dunif(1,100000)
   sd ~ dunif(1,100000)
   
   # Adult numbers
+  
 	for(i in 1:years) {
 	
-	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(1, 1e+09)
-
+	  Nadult[i] ~ dnorm(mu, 1/(sd^2)) T(0, 1e+09)
+  
     surv[i] ~ dunif(0.5, 0.95)
 
 	}
 	
-	
   for(j in 1:nobs) {
     
     TruePairs[j] ~ dbinom(
-      (RObase[j] * (surv[year[j]]^ AgeDif[j])*StockWeight[j]) /
+      (fecundity_weigtht[j] * RObase[j] * (surv[year[j]]^ AgeDif[j])) /
       ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
       (Nadult[year[j]] * (1 - knownSex[j]))),
       Pair_viable_count_per_agedif[j]
     )
-  }	
+  }
 
-}", file = "HSPPOP.sex.stocks.singleY.jags")
+
+}", file = "HSPPOPsingleYVB.jags")
 
 
 
@@ -239,8 +177,9 @@ cat("model{
 #### Data to define for JAGS model ####
 
 
+
 # years being estimated (years that actually have potential)
-Cohort_years <- kinshipsSexStock %>% 
+Cohort_years <- kinshipsVB %>% 
   group_by(Cohort_2) %>% 
   dplyr::summarise(
     Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
@@ -252,20 +191,24 @@ Cohort_years <- kinshipsSexStock %>%
 years <- nrow(Cohort_years)
 
 
+
 # group together by cohort year and age dif (differing probabilities)
-Cohort_years_cohort_age <- kinshipsSexStock %>%
+Cohort_years_cohort_age <- kinshipsVB %>%
   group_by(Cohort_2, AgeDif) %>%
   dplyr::summarise(
     Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
 
 
+
+
+
 # add the counts to each observation
-kinshipsSex_obs <- kinshipsSexStock %>%
+kinshipsVB_obs <- kinshipsVB %>%
   left_join(Cohort_years_cohort_age, by = c("Cohort_2", "AgeDif"))
 
 # year index to link kinship to years (just the number to match it, not the actual year)
-year_index <- factor(kinshipsSex_obs$Cohort_2, levels = Cohort_years$Cohort_2)
-kinshipsSex_obs <- kinshipsSex_obs %>%
+year_index <- factor(kinshipsVB_obs$Cohort_2, levels = Cohort_years$Cohort_2)
+kinshipsVB_obs <- kinshipsVB_obs %>%
   mutate(
     year_index = as.integer(year_index)
   )
@@ -275,45 +218,30 @@ kinshipsSex_obs <- kinshipsSex_obs %>%
 
 # Count the ones with known sex (U = 0)
 # Count females (F = 1)
-kinshipsSex_obs <- kinshipsSex_obs %>%
+kinshipsVB_obs <- kinshipsVB_obs %>%
   mutate(
     knownSex = as.numeric(!is.na(sex_num)),
     IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
   )
 
-
-
 # Real POP/HSP - here assign randomly based on probability 
 
 set.seed(777)
+kinshipsVB_obs <- kinshipsVB_obs %>% 
+  mutate(TruePairs = case_when(
+    RObase == 1 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 2 ~ rbinom(nrow(.), size = 1, prob = 0.001),
+    RObase == 4 ~ rbinom(nrow(.), size = 1, prob = 0.0001),
+    TRUE ~ 0
+  ))
 
-# parameters for decay rate of pair likelihood with age
-HS_true <- 0.0001 # edit this number to change the total percentage of pairs that are true
-HS_beta <- 0.3 # decay rate of half siblings based on survival of shared parent 
-PO_true <- 0.001 # edit this number to change the total percentage of pairs that are true
 
-# parent modeling
-kinshipsSex_obs <- kinshipsSex_obs %>% 
-  mutate(Age_spawn = FinalAge_1 - FinalAge_2,
-  Length_spawn = Length_mm * (1 - exp(-k*(Age_spawn - t0))) / (1 - exp(-k*(FinalAge_1 - t0))))
-
-kinshipsSex_obs <- kinshipsSex_obs %>%
-  mutate(fecundity = 0.0404 * (Length_spawn / 10)^3.527)
-
-# assign true pairs systematically 
-kinshipsSex_obs <- kinshipsSex_obs %>% 
-  mutate(trueProb = case_when(
-    RObase == 1 ~ PO_true,
-    RObase == 2 ~ PO_true,
-    RObase == 4 ~ HS_true*exp(-HS_beta*abs(AgeDif)),
-    TRUE ~ 0),
-    TruePairs = rbinom(nrow(.), size = 1, prob = trueProb))
 
 
 #### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
-group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase","StockWeight")
+group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase","fecundity_weigtht")
 
-collapsed <- kinshipsSex_obs %>%
+collapsed <- kinshipsVB_obs %>%
   group_by(year_index,across(all_of(group_vars))) %>%
   dplyr::summarise(
     Pair_viable_count_per_agedif = n(),                   
@@ -330,14 +258,13 @@ collapsed <- kinshipsSex_obs %>%
 data = list( years = years,  # number of cohorts,
              TruePairs = collapsed$TruePairs,
              AgeDif = collapsed$AgeDif,
-             Pair_viable_count = collapsed$Pair_viable_count_per_agedif,
              RObase = collapsed$RObase,
              knownSex = as.numeric(collapsed$knownSex),
              nobs = nrow(collapsed),
              IsFemale = collapsed$IsFemale,
              Pair_viable_count_per_agedif = collapsed$Pair_viable_count_per_agedif,
              year=collapsed$year_index,
-             StockWeight = collapsed$StockWeight
+             fecundity_weigtht = collapsed$fecundity_weigtht
 )
 
 # Initial values
@@ -360,31 +287,15 @@ niter <- 5000
 n.cores = 3
 
 
-Out = jagsUI::jags(data, inits, params, "HSPPOP.sex.stocks.singleY.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
-# worked initially will a few funky Rhat values for some Nhat years where Neff was low. 
-
-# if issues occur, run un parallelized
-Out <- jagsUI::jags(
-  data = data,
-  inits = inits,
-  parameters.to.save = params,
-  model.file = "HSPPOP.sex.stocks.singleY.jags",
-  n.burnin = nburn,
-  n.chains = nchains,
-  n.iter = niter,
-  parallel = FALSE,
-  verbose = TRUE
-)
+Out = jagsUI::jags(data, inits, params, "HSPPOPsingleYVB.jags", n.burnin = nburn,
+                   n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
 
 
 
-
-
-
-
-
-
-
+# if parallelization is being funky...
+Out <- jagsUI::jags(data = data, inits = inits, parameters.to.save = params,
+  model.file = "HSPPOPsingleYVB.jags", n.burnin = nburn, n.chains = nchains,
+  n.iter = niter, parallel = F, verbose = T)
 
 
 
