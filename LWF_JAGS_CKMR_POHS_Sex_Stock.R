@@ -94,6 +94,9 @@ ggplot(LWF_final_well_mixed, aes(x = Stock),colo) +
 
 
 
+
+
+
 ### POPs filter 
 POpairs <- LWF_final_GMZ_mixed %>%
   rename_with(~ paste0(.x, "_1"), everything()) %>% # add the columns fro each indiv
@@ -128,8 +131,8 @@ POPonly <- POpairs %>%
   mutate(RObase=ifelse(Sex_1 == "U",2,1)) %>% 
   mutate(Stock_1 = unlist(Stock_1),
          Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # likllihoods for if they are from the same place vs not
-
+         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) %>%  # likelihoods for if they are from the same place vs not
+  mutate(Age_dif_exp = 0)
 
 ### HSPs and combine ###
 
@@ -159,8 +162,8 @@ HSPonly <- HSpairs %>%
   mutate(RObase=4) %>% 
   mutate(Stock_1 = unlist(Stock_1),
          Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # liklihoods for if they are from the same place vs not
-
+         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) %>%  # liklihoods for if they are from the same place vs not
+  mutate(Age_dif_exp = nyears)
 # join the two tables
 library(plyr)
 kinshipsSexStock <- rbind(data.frame=POPonly,
@@ -224,7 +227,7 @@ cat("model{
   for(j in 1:nobs) {
     
     TruePairs[j] ~ dbinom(
-      (RObase[j] * (surv[year[j]]^ AgeDif[j])*StockWeight[j]) /
+      (RObase[j] * (surv[year[j]]^ AgeDif[j]) * StockWeight[j]) /
       ((Nadult[year[j]] * knownSex[j] * abs(propM - IsFemale[j])) +
       (Nadult[year[j]] * (1 - knownSex[j]))),
       Pair_viable_count_per_agedif[j]
@@ -289,16 +292,9 @@ set.seed(777)
 
 # parameters for decay rate of pair likelihood with age
 HS_true <- 0.0001 # edit this number to change the total percentage of pairs that are true
-HS_beta <- 0.3 # decay rate of half siblings based on survival of shared parent 
+HS_beta <- 0.6 # decay rate of half siblings based on survival of shared parent 
 PO_true <- 0.001 # edit this number to change the total percentage of pairs that are true
 
-# parent modeling
-kinshipsSex_obs <- kinshipsSex_obs %>% 
-  mutate(Age_spawn = FinalAge_1 - FinalAge_2,
-  Length_spawn = Length_mm * (1 - exp(-k*(Age_spawn - t0))) / (1 - exp(-k*(FinalAge_1 - t0))))
-
-kinshipsSex_obs <- kinshipsSex_obs %>%
-  mutate(fecundity = 0.0404 * (Length_spawn / 10)^3.527)
 
 # assign true pairs systematically 
 kinshipsSex_obs <- kinshipsSex_obs %>% 
@@ -311,7 +307,7 @@ kinshipsSex_obs <- kinshipsSex_obs %>%
 
 
 #### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
-group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase","StockWeight")
+group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase","StockWeight", "Age_dif_exp")
 
 collapsed <- kinshipsSex_obs %>%
   group_by(year_index,across(all_of(group_vars))) %>%
@@ -329,8 +325,7 @@ collapsed <- kinshipsSex_obs %>%
 # make sure all (except years for i loop) are equal to nobs! Check with length first...
 data = list( years = years,  # number of cohorts,
              TruePairs = collapsed$TruePairs,
-             AgeDif = collapsed$AgeDif,
-             Pair_viable_count = collapsed$Pair_viable_count_per_agedif,
+             AgeDif = collapsed$Age_dif_exp,
              RObase = collapsed$RObase,
              knownSex = as.numeric(collapsed$knownSex),
              nobs = nrow(collapsed),
@@ -443,4 +438,5 @@ ggplot(Rhat_df, aes(x = Year, y = Rhat)) +
     title = "Posterior estimates of Convergence (R-hat) 
   in a well mixed fishery"
   ) +
-  theme_minimal(base_size = 14)
+  theme_minimal(base_size = 14) +
+  geom_hline(yintercept = 1.1, linetype = "dashed", color = "darkred")

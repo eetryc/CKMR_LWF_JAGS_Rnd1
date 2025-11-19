@@ -159,7 +159,7 @@ HSPonly <- HSpairs %>%
   mutate(RObase=4) %>% 
   mutate(Stock_1 = unlist(Stock_1),
          Stock_2 = unlist(Stock_2),
-         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # liklihoods for if they are from the same place vs not
+         StockWeight = ifelse(Stock_1 == Stock_2, 1, 0.1)) # likelihoods for if they are from the same place vs not
 
 # join the two tables
 library(plyr)
@@ -288,18 +288,18 @@ kinshipsSex_obs <- kinshipsSex_obs %>%
 set.seed(777)
 
 # parameters for decay rate of pair likelihood with age
-HS_true <- 0.0001 # edit this number to change the total percentage of pairs that are true
-HS_beta <- 0.3 # decay rate of half siblings based on survival of shared parent 
-PO_true <- 0.001 # edit this number to change the total percentage of pairs that are true
+HS_true <- 0.001 # edit this number to change the total percentage of pairs that are true
+HS_beta <- 0.7 # decay rate of half siblings based on survival of shared parent 
+PO_true <- 0.01 # edit this number to change the total percentage of pairs that are true
 
 
 
 # assign true pairs systematically 
 kinshipsSex_obs <- kinshipsSex_obs %>% 
   mutate(trueProb = case_when(
-    RObase == 1 ~ PO_true,
-    RObase == 2 ~ PO_true,
-    RObase == 4 ~ HS_true*exp(-HS_beta*abs(AgeDif)),
+    RObase == 1 ~ PO_true * StockWeight,
+    RObase == 2 ~ PO_true * StockWeight,
+    RObase == 4 ~ (HS_true*exp(-HS_beta*abs(AgeDif))) * StockWeight,
     TRUE ~ 0),
     TruePairs = rbinom(nrow(.), size = 1, prob = trueProb))
 
@@ -318,7 +318,7 @@ collapsed <- kinshipsSex_obs %>%
 
 
 
-#### Run for single year ----
+# Run for single year ----
 # use as.numeric if any are giving issues
 # make sure all (except years for i loop) are equal to nobs! Check with length first...
 data = list( years = years,  # number of cohorts,
@@ -373,15 +373,6 @@ Out <- jagsUI::jags(
 
 
 
-
-
-
-
-
-
-
-
-
 # Extract posterior summary as a data frame
 nhat <- as.data.frame(Out$summary)
 
@@ -405,9 +396,7 @@ ggplot(nhat_df, aes(x = Year, y = mean)) +
   labs(
     x = "Year (Cohort index)",
     y = expression(hat(N)[adult]),
-    title = "Posterior estimates of adult abundance (N-hat) 
-  in a mixed fishery"
-  ) +
+    title = "Posterior estimates of adult abundance (N-hat)"  ) +
   theme_minimal(base_size = 14)
 
 
@@ -456,39 +445,17 @@ ggplot(Rhat_df, aes(x = Year, y = Rhat)) +
 
 
 
+
+
+
+
 #################### Test mixing effects on total, GMZ3 estimates of abundance
 
 
 #### Now test with only the fish in GMZ3
 
 
-
-kinshipsGMZ3 <- kinshipsSexStock
-
-
-
-# Real POP/HSP - here assign randomly based on probability 
-
-set.seed(777)
-
-# parameters for decay rate of pair likelihood with age
-HS_trueGMZ3 <- 0.0001 # edit this number to change the total percentage of pairs that are true
-HS_betaGMZ3 <- 0.3 # decay rate of half siblings based on survival of shared parent 
-PO_trueGMZ3 <- 0.001 # edit this number to change the total percentage of pairs that are true
-
-
-
-# assign true pairs systematically 
-kinshipsSex_obsGMZ3 <- kinshipsGMZ3 %>% 
-  mutate(trueProb = case_when(
-    RObase == 1 ~ PO_true,
-    RObase == 2 ~ PO_true,
-    RObase == 4 ~ HS_true*exp(-HS_beta*abs(AgeDif)),
-    TRUE ~ 0),
-    TruePairs = rbinom(nrow(.), size = 1, prob = trueProb))
-
-
-kinshipsSex_obsGMZ3 <- kinshipsSex_obsGMZ3 %>% 
+kinshipsSex_obsGMZ3 <- kinshipsSex_obs %>% 
   filter(StockPair == "GMZ3_GMZ3")
 
 
@@ -553,7 +520,7 @@ collapsedGMZ3 <- kinshipsSex_obsGMZ3 %>%
 
 
 
-#### Run for single year ----
+### Run for single year ----
 # use as.numeric if any are giving issues
 # make sure all (except years for i loop) are equal to nobs! Check with length first...
 GMZ3data = list( years = yearsGMZ3,  # number of cohorts,
@@ -571,8 +538,8 @@ GMZ3data = list( years = yearsGMZ3,  # number of cohorts,
 # Initial values
 initsGMZ3 = function() {
   list(
-    mu = runif(1, 1, 100000),
-    sd = runif(1, 1, 100000),
+    mu = runif(1, 1, 25000),
+    sd = runif(1, 1, 25000),
     propM = runif(1,0.01, 0.99),
     Nadult = rep(10000, years),   # vector of length POP_years
     surv = (rep(.7,years))
@@ -614,23 +581,22 @@ OutGMZ3 <- jagsUI::jags(
 
 
 
-
+#### Graph
 
 # Extract posterior summary as a data frame
 nhatGMZ3 <- as.data.frame(OutGMZ3$summary)
 nhatGMZ3 <- nhatGMZ3[grep("^Nadult", rownames(nhatGMZ3)), ]
 # Add a Year index (1, 2, 3, ...)
-nhat_dfGMZ3$Year.index <- 1:nrow(nhat)
-nhat_dfGMZ3$Year <-1993:2020
+nhatGMZ3$Year.index <- 1:nrow(nhat)
+nhatGMZ3$Year <-1993:2020
 
 # Select the useful columns
-nhat_dfGMZ3 <- nhat_dfGMZ3 %>%
+nhatGMZ3 <- nhatGMZ3 %>%
   dplyr::select(Year, mean, `2.5%`, `50%`, `97.5%`)
 
 
-library(ggplot2)
 
-ggplot(nhat_dfGMZ3, aes(x = Year, y = mean)) +
+ggplot(nhatGMZ3, aes(x = Year, y = mean)) +
   geom_line(color = "blue", linewidth = 1) +
   geom_point(color = "blue") +
   geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2, fill = "lightblue") +
@@ -869,7 +835,7 @@ collapsed_well_mixed <- kinshipsSex_obs_well_mixed %>%
 
 
 
-#### Run for single year ----
+# Run for single year ----
 # use as.numeric if any are giving issues
 # make sure all (except years for i loop) are equal to nobs! Check with length first...
 well_mixeddata = list( years = years_well_mixed,  # number of cohorts,
@@ -1068,7 +1034,7 @@ collapsedGMZ3_well_mixed <- kinshipsSex_obsGMZ3_well_mixed %>%
 
 
 
-#### Run for single year ----
+# Run for single year ----
 # use as.numeric if any are giving issues
 # make sure all (except years for i loop) are equal to nobs! Check with length first...
 GMZ3_well_mixeddata = list( years = yearsGMZ3_well_mixed,  # number of cohorts,
