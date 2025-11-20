@@ -38,16 +38,16 @@ LWF_final_GMZ_mixed <- original_clean %>%
       ),
       TRUE ~ NA_character_
     )
-  )
+  ) 
 
 
 # test for a little dispersal
 table(unlist(LWF_final_GMZ_mixed$Stock))
 
 # visualize stock assignment distribution 
-ggplot(LWF_final_GMZ_mixed, aes(x = Stock),colo) +
-  geom_bar() +
-  theme_minimal() +
+ggplot(LWF_final_GMZ_mixed, aes(x = Stock)) +
+  geom_bar(aes(y = after_stat(count / sum(count) * 100))) +
+  theme_bw() +
   xlab("Source") +
   ylab("Percent of Individuals Caught in WFM-06") 
 
@@ -293,15 +293,15 @@ set.seed(777)
 # parameters for decay rate of pair likelihood with age
 HS_true <- 0.0001 # edit this number to change the total percentage of pairs that are true
 HS_beta <- 0.6 # decay rate of half siblings based on survival of shared parent 
-PO_true <- 0.001 # edit this number to change the total percentage of pairs that are true
+PO_true <- 0.0001 # edit this number to change the total percentage of pairs that are true
 
 
 # assign true pairs systematically 
 kinshipsSex_obs <- kinshipsSex_obs %>% 
   mutate(trueProb = case_when(
-    RObase == 1 ~ PO_true,
-    RObase == 2 ~ PO_true,
-    RObase == 4 ~ HS_true*exp(-HS_beta*abs(AgeDif)),
+    RObase == 1 ~ PO_true * StockWeight,
+    RObase == 2 ~ PO_true * StockWeight,
+    RObase == 4 ~ HS_true*exp(-HS_beta*abs(AgeDif)) * StockWeight,
     TRUE ~ 0),
     TruePairs = rbinom(nrow(.), size = 1, prob = trueProb))
 
@@ -338,8 +338,8 @@ data = list( years = years,  # number of cohorts,
 # Initial values
 inits = function() {
   list(
-    mu = runif(1, 1, 100000),
-    sd = runif(1, 1, 100000),
+    mu = runif(1, 1, 10000),
+    sd = runif(1, 1, 10000),
     propM = runif(1,0.01, 0.99),
     Nadult = rep(10000, years),   # vector of length POP_years
     surv = (rep(.7,years))
@@ -351,7 +351,7 @@ params = c("Nadult","surv","propM")
 
 nburn <- 3000
 nchains <- 3
-niter <- 5000
+niter <- 10000
 n.cores = 3
 
 
@@ -406,8 +406,9 @@ ggplot(nhat_df, aes(x = Year, y = mean)) +
   labs(
     x = "Year (Cohort index)",
     y = expression(hat(N)[adult]),
-    title = "Posterior estimates of adult abundance (N-hat) 
-  in a mixed fishery"
+    #title = "Posterior estimates of adult 
+#abundance (N-hat) in a mixed fishery
+#with uniform parameters"
   ) +
   theme_minimal(base_size = 14)
 
@@ -435,8 +436,205 @@ ggplot(Rhat_df, aes(x = Year, y = Rhat)) +
   labs(
     x = "Year (Cohort index)",
     y = "Convergence (R-hat)",
-    title = "Posterior estimates of Convergence (R-hat) 
-  in a well mixed fishery"
+    title = "Posterior estimates of convergence 
+(R-hat) in a well mixed fishery"
   ) +
   theme_minimal(base_size = 14) +
   geom_hline(yintercept = 1.1, linetype = "dashed", color = "darkred")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### Only GMZ3
+## Start off after true pairs are assigned 
+
+GMZ3_kinshipsSex_obs <-  kinshipsSex_obs %>% 
+  filter(StockPair == "GMZ3_GMZ3")
+
+
+# extract years (count to give to be i in JAGS)
+Cohort_yearsGMZ3 <- GMZ3_kinshipsSex_obs %>% 
+  group_by(Cohort_2) %>% 
+  dplyr::summarise(
+    Pair_viable_count = sum(HSPPOP_candidate > 0, na.rm = TRUE)
+  ) %>% 
+  filter(Pair_viable_count > 0) %>%     # keep only cohorts with >0
+  arrange(Cohort_2)
+yearsGMZ3 <- nrow(Cohort_yearsGMZ3)
+
+# group together by cohort year and age dif (differing probabilities)
+Cohort_years_cohort_ageGMZ3 <- GMZ3_kinshipsSex_obs %>%
+  group_by(Cohort_2, AgeDif) %>%
+  dplyr::summarise(
+    Pair_viable_count_per_agedif = sum(HSPPOP_candidate > 0, na.rm = TRUE))
+
+
+# add the counts to each observation
+GMZ3_kinshipsSex_obs <- GMZ3_kinshipsSex_obs %>%
+  left_join(Cohort_years_cohort_ageGMZ3, by = c("Cohort_2", "AgeDif"))
+
+
+
+
+
+# Count the ones with known sex (U = 0)
+# Count females (F = 1)
+GMZ3_kinshipsSex_obs <- GMZ3_kinshipsSex_obs %>%
+  mutate(
+    knownSex = as.numeric(!is.na(sex_num)),
+    IsFemale = as.numeric(!is.na(sex_num) & (sex_num == 0))  # if sex_num encoded 0 = female
+  )
+
+
+
+
+
+
+# year index to link kinship to years (just the number to match it, not the actual year)
+year_indexGMZ3 <- factor(GMZ3_kinshipsSex_obs$Cohort_2, levels = Cohort_years$Cohort_2)
+GMZ3_kinshipsSex_obs <- GMZ3_kinshipsSex_obs %>%
+  mutate(
+    year_index = as.integer(year_indexGMZ3)
+  )
+
+
+
+
+
+#### Now collapse based on cohort 2, age difference, RObase, if sex is known, and female or male 
+group_vars <- c("Cohort_2", "AgeDif", "knownSex", "IsFemale", "RObase","StockWeight", "Age_dif_exp")
+
+GMZ3_collapsed <- GMZ3_kinshipsSex_obs %>%
+  group_by(year_index,across(all_of(group_vars))) %>%
+  dplyr::summarise(
+    Pair_viable_count_per_agedif = n(),                   
+    TruePairs = sum(TruePairs, na.rm=TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Cohort_2, AgeDif)
+
+
+
+#### Run for single year ----
+# use as.numeric if any are giving issues
+# make sure all (except years for i loop) are equal to nobs! Check with length first...
+GMZ3_data = list( years = years,  # number of cohorts,
+             TruePairs = GMZ3_collapsed$TruePairs,
+             AgeDif = GMZ3_collapsed$Age_dif_exp,
+             RObase = GMZ3_collapsed$RObase,
+             knownSex = as.numeric(GMZ3_collapsed$knownSex),
+             nobs = nrow(GMZ3_collapsed),
+             IsFemale = GMZ3_collapsed$IsFemale,
+             Pair_viable_count_per_agedif = GMZ3_collapsed$Pair_viable_count_per_agedif,
+             year=GMZ3_collapsed$year_index,
+             StockWeight = GMZ3_collapsed$StockWeight
+)
+
+# Initial values
+GMZ3_inits = function() {
+  list(
+    mu = runif(1, 1, 5000),
+    sd = runif(1, 1, 5000),
+    propM = runif(1,0.01, 0.99),
+    Nadult = rep(5000, years),   # vector of length POP_years
+    surv = (rep(.7,years))
+  )
+}
+
+# Parameters to follow
+params = c("Nadult","surv","propM")
+
+nburn <- 3000
+nchains <- 3
+niter <- 10000
+n.cores = 3
+
+
+GMZ3_Out = jagsUI::jags(GMZ3_data, GMZ3_inits, params, "HSPPOP.sex.stocks.singleY.jags", n.burnin = nburn, n.chains = nchains, n.iter = niter, parallel = T, verbose = T)
+# worked initially will a few funky Rhat values for some Nhat years where Neff was low. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Extract posterior summary as a data frame
+GMZ3_nhat <- as.data.frame(GMZ3_Out$summary)
+
+# Keep only the Nadult rows
+GMZ3_nhat <- GMZ3_nhat[grep("^Nadult", rownames(GMZ3_nhat)), ]
+
+# Add a Year index (1, 2, 3, ...)
+GMZ3_nhat$Year <- 1:nrow(GMZ3_nhat)
+
+# Select the useful columns
+GMZ3_nhat_df <- GMZ3_nhat %>%
+  dplyr::select(Year, mean, `2.5%`, `50%`, `97.5%`)
+
+ggplot(GMZ3_nhat_df, aes(x = Year, y = mean)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_point(color = "blue") +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2, fill = "lightblue") +
+  labs(
+    x = "Year (Cohort index)",
+    y = expression(hat(N)[adult]),
+    # title = "Posterior estimates of adult 
+# abundance (N-hat) in mixed fishery
+# (GMZ3 only)"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+
+
+
+
+# Extract posterior summary as a data frame
+GMZ3_Rhat <- as.data.frame(GMZ3_Out$summary)
+
+# Keep only the Rhat rows
+GMZ3_Rhat <- GMZ3_Rhat[grep("^Nadult", rownames(Rhat)), ]
+
+# Add a Year index (1, 2, 3, ...)
+GMZ3_Rhat$Year <- 1:nrow(GMZ3_Rhat)
+
+# Select the useful columns
+GMZ3_Rhat_df <- GMZ3_Rhat %>%
+  dplyr::select(Year, mean, `2.5%`, `50%`, `97.5%`,Rhat)
+ggplot(GMZ3_Rhat_df, aes(x = Year, y = Rhat)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_point(color = "blue") +
+  labs(
+    x = "Year (Cohort index)",
+    y = "Convergence (R-hat)",
+    # title = "Posterior estimates of convergence 
+# (R-hat) in a well mixed fishery"
+  ) +
+  theme_minimal(base_size = 14) +
+  geom_hline(yintercept = 1.1, linetype = "dashed", color = "darkred")
+
